@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+   <head>
+      <meta charset="UTF-8" />
+      <title>Three.js Tile Map</title>
+      <style>
+         body {
+            margin: 0;
+            overflow: hidden;
+         }
+         canvas {
+            display: block;
+         }
+      </style>
+   </head>
+   <body>
+      <script src="https://cdn.jsdelivr.net/npm/three@0.160/build/three.min.js"></script>
+
+      <script>
+         // =========================
+         // Scene Setup
+         // =========================
+         const scene = new THREE.Scene();
+
+         const camera = new THREE.PerspectiveCamera(
+            60,
+            window.innerWidth / window.innerHeight,
+            0.1,
+            10000,
+         );
+         camera.position.set(0, 0, 10);
+
+         const renderer = new THREE.WebGLRenderer({ antialias: true });
+         renderer.setSize(window.innerWidth, window.innerHeight);
+         document.body.appendChild(renderer.domElement);
+
+         // =========================
+         // Config
+         // =========================
+         const TILE_SIZE = 1;
+         const MIN_ZOOM = 2;
+         const MAX_ZOOM = 19;
+
+         const TILE_URL = (z, x, y) =>
+            `https://helibhumi.ai:4001/static/heliTile/${z}/${x}/${y}.png`; // replace with your API
+
+         const tileGroup = new THREE.Group();
+         scene.add(tileGroup);
+
+         const tiles = new Map();
+         const loader = new THREE.TextureLoader();
+
+         // =========================
+         // Center location (Himalaya)
+         // =========================
+         let centerLat = 27.9881;
+         let centerLon = 86.925;
+
+         // drag state
+         let isDragging = false;
+         let lastMouse = { x: 0, y: 0 };
+
+         // =========================
+         // Math Helpers
+         // =========================
+         function latLonToTile(lat, lon, z) {
+            const n = Math.pow(2, z);
+            const x = Math.floor(n * ((lon + 180) / 360));
+            const latRad = (lat * Math.PI) / 180;
+            const y = Math.floor(
+               (n *
+                  (1 -
+                     Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI)) /
+                  2,
+            );
+            return { x, y };
+         }
+
+         function tileToWorld(x, y) {
+            return {
+               x: x * TILE_SIZE,
+               y: -y * TILE_SIZE,
+            };
+         }
+
+         function getZoom(cameraZ) {
+            const zoom = Math.floor(18 - Math.log2(cameraZ));
+            return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
+         }
+
+         // =========================
+         // Tile Logic
+         // =========================
+         function createTile(x, y, z) {
+            const key = `${z}/${x}/${y}`;
+            if (tiles.has(key)) return;
+
+            const url = TILE_URL(z, x, y);
+
+            const texture = loader.load(url);
+
+            const geo = new THREE.PlaneGeometry(TILE_SIZE, TILE_SIZE);
+            const mat = new THREE.MeshBasicMaterial({ map: texture });
+
+            const mesh = new THREE.Mesh(geo, mat);
+
+            const pos = tileToWorld(x, y);
+            mesh.position.set(pos.x, pos.y, 0);
+
+            tileGroup.add(mesh);
+            tiles.set(key, mesh);
+         }
+
+         function removeTiles(validKeys) {
+            for (let key of tiles.keys()) {
+               if (!validKeys.has(key)) {
+                  const mesh = tiles.get(key);
+                  tileGroup.remove(mesh);
+                  mesh.geometry.dispose();
+                  mesh.material.map.dispose();
+                  mesh.material.dispose();
+                  tiles.delete(key);
+               }
+            }
+         }
+
+         function updateTiles() {
+            const zoom = getZoom(camera.position.z);
+
+            const { x: cx, y: cy } = latLonToTile(centerLat, centerLon, zoom);
+
+            const range = 4; // visible radius
+            const needed = new Set();
+
+            for (let dx = -range; dx <= range; dx++) {
+               for (let dy = -range; dy <= range; dy++) {
+                  const x = cx + dx;
+                  const y = cy + dy;
+
+                  const key = `${zoom}/${x}/${y}`;
+                  needed.add(key);
+
+                  createTile(x, y, zoom);
+               }
+            }
+
+            removeTiles(needed);
+
+            // center camera on tile center
+            const centerPos = tileToWorld(cx, cy);
+            tileGroup.position.set(-centerPos.x, -centerPos.y, 0);
+         }
+
+         // =========================
+         // Controls (Pan + Zoom)
+         // =========================
+         window.addEventListener("mousedown", (e) => {
+            isDragging = true;
+            lastMouse.x = e.clientX;
+            lastMouse.y = e.clientY;
+         });
+
+         window.addEventListener("mouseup", () => {
+            isDragging = false;
+         });
+
+         window.addEventListener("mousemove", (e) => {
+            if (!isDragging) return;
+
+            const dx = e.clientX - lastMouse.x;
+            const dy = e.clientY - lastMouse.y;
+
+            lastMouse.x = e.clientX;
+            lastMouse.y = e.clientY;
+
+            // adjust lat/lon (approximate)
+            const scale = camera.position.z * 0.0005;
+
+            centerLon -= dx * scale;
+            centerLat += dy * scale;
+         });
+
+         window.addEventListener("wheel", (e) => {
+            camera.position.z += e.deltaY * 0.01;
+            camera.position.z = Math.max(1, Math.min(500, camera.position.z));
+         });
+
+         // =========================
+         // Resize
+         // =========================
+         window.addEventListener("resize", () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+         });
+
+         // =========================
+         // Render Loop
+         // =========================
+         function animate() {
+            requestAnimationFrame(animate);
+
+            updateTiles();
+
+            renderer.render(scene, camera);
+         }
+
+         animate();
+      </script>
+   </body>
+</html>
