@@ -6,7 +6,7 @@ const textureLoader = new THREE.TextureLoader();
 
 export async function createTile(z, y, x, worldX, worldZ) {
    const url = `https://helibhumi.ai:4001/static/heliTile/${z}/${y}/${x}.png`;
-   // const url = `https://tile.openstreetmap.org/${z}/${x}/${y}.png`;
+  
 
    try {
       const texture = await textureLoader.loadAsync(url);
