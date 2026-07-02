@@ -67,7 +67,11 @@ import { Line2 } from "three/addons/lines/Line2.js";
 import { LineMaterial } from "three/addons/lines/LineMaterial.js";
 import { LineGeometry } from "three/addons/lines/LineGeometry.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { TileMath } from "../utils/TileMath";
 import { createTile } from "../utils/TileLoader";
+import { TileCache } from "../utils/TileCache";
+import { TileManager } from "../utils/TileManager";
+import { CameraController } from "../utils/CameraController";
 import {
    saveGeometry,
    loadGeometry,
@@ -85,10 +89,15 @@ let scene;
 let camera;
 let renderer;
 let controls;
+let cameraController;
 let raycaster;
 let mouse;
 
-const tileCache = new Map();
+// const tileCache = new Map();
+
+const tileCache = new TileCache();
+// let visibleTileKeys = new Set();
+let tileManager;
 
 let points = [];
 // let mode = "POINT";
@@ -121,21 +130,38 @@ let polygonGroup;
 let buildingGroup;
 
 const selectedColor = 0xffff00;
-const TILE_SIZE = 256;
-const TILE_RADIUS = 2;
 
-let currentZoom = 13;
+const TILE_SIZE = 256;
+const TILE_RADIUS = 3;
+const WORLD_TILE_SIZE = TILE_SIZE;
+
+let currentZoom = 10;
 let lastZoom = currentZoom;
 
-let currentCenterX = 3500;
-let currentCenterY = 5928;
+// let pendingTileUpdate = false;
+
+const centerLat = 28.6139;
+const centerLon = 82.209;
+
+const centerTile = TileMath.latLonToTile(centerLat, centerLon, currentZoom);
+let currentCenterX = centerTile.x;
+let currentCenterY = centerTile.y;
 
 let lastCenterTileX = currentCenterX;
 let lastCenterTileY = currentCenterY;
 
+// const originTileX = currentCenterX;
+// const originTileY = currentCenterY;
+
+let worldOffsetX = 0;
+let worldOffsetY = 0;
+
+// let isTileLoading = false;
+
 onMounted(async () => {
    init();
-   await loadTiles(currentCenterX, currentCenterY);
+   // await loadTiles(currentCenterX, currentCenterY);
+   await tileManager.loadTiles(currentZoom, currentCenterX, currentCenterY);
    await loadSavedGeometry();
    animate();
 });
@@ -151,6 +177,7 @@ function init() {
 
    tileGroup = new THREE.Group();
    scene.add(tileGroup);
+   tileManager = new TileManager(tileGroup, tileCache, TILE_SIZE, TILE_RADIUS);
 
    pointGroup = new THREE.Group();
    scene.add(pointGroup);
@@ -168,13 +195,14 @@ function init() {
    mouse = new THREE.Vector2();
 
    camera = new THREE.PerspectiveCamera(
-      75,
+      60,
       window.innerWidth / window.innerHeight,
       0.1,
       10000,
    );
 
-   camera.position.set(800, 800, 800);
+   // camera.position.set(800, 800, 800);
+   camera.position.set(0, 1200, 0);
 
    renderer = new THREE.WebGLRenderer({
       antialias: true,
@@ -194,6 +222,8 @@ function init() {
    controls.maxPolarAngle = Math.PI / 2.1;
    controls.target.set(0, 0, 0);
 
+   cameraController = new CameraController(camera, controls);
+
    // const axes = new THREE.AxesHelper(100);
    // scene.add(axes);
 
@@ -211,34 +241,62 @@ function init() {
    updateLayerVisibility();
 }
 
-// LOAD TILE
-async function loadTiles(centerX, centerY) {
-   for (let y = centerY - TILE_RADIUS; y <= centerY + TILE_RADIUS; y++) {
-      for (let x = centerX - TILE_RADIUS; x <= centerX + TILE_RADIUS; x++) {
-         const key = `${currentZoom}_${y}_${x}`;
-         if (tileCache.has(key)) continue;
+function updateTileManager() {
+   updateCenterFromCamera();
 
-         const tile = await createTile(
-            // zoom,
-            // TILE_ZOOM,
-            currentZoom,
-            y,
-            x,
-            (x - centerX) * TILE_SIZE,
-            (y - centerY) * TILE_SIZE,
-         );
-
-         if (tile) {
-            tileCache.set(key, tile);
-
-            tileGroup.add(tile);
-            // const box = new THREE.BoxHelper(tile, 0xff0000);
-            // tileGroup.add(box);
-         }
-      }
+   const zoomChanged = updateZoomLevel();
+   if (zoomChanged) {
+      recalculateCenterTile();
+      tileManager.update(currentZoom, currentCenterX, currentCenterY);
+      return;
    }
+
+   // tileManager.reposition(currentCenterX, currentCenterY);
+   const centerChanged =
+      Math.abs(currentCenterX - lastCenterTileX) > 0.25 ||
+      Math.abs(currentCenterY - lastCenterTileY) > 0.25;
+   // const centerChanged =
+   //    Math.abs(currentCenterX - lastCenterTileX) > 0.5 ||
+   //    Math.abs(currentCenterY - lastCenterTileY) > 0.5;
+
+   if (!centerChanged) {
+      return;
+   }
+   lastCenterTileX = currentCenterX;
+   lastCenterTileY = currentCenterY;
+
+   // updateTiles();
+   tileManager.update(currentZoom, currentCenterX, currentCenterY);
 }
 
+//  Camera Controller
+function updateCenterFromCamera() {
+   const center = cameraController.getCenterWorldPosition();
+
+   worldOffsetX = center.x / WORLD_TILE_SIZE;
+   worldOffsetY = center.z / WORLD_TILE_SIZE;
+
+   recalculateCenterTile();
+}
+
+function recalculateCenterTile() {
+   const center = TileMath.latLonToTile(centerLat, centerLon, currentZoom);
+   currentCenterX = center.x + worldOffsetX;
+   currentCenterY = center.y + worldOffsetY;
+}
+
+function updateZoomLevel() {
+   const zoom = cameraController.getZoomLevel();
+   if (zoom === currentZoom) {
+      return false;
+   }
+   lastZoom = currentZoom;
+   currentZoom = zoom;
+   console.log("ZOOM : ", currentZoom);
+   return true;
+}
+
+// GEOMETRY
 async function loadSavedGeometry() {
    const geometry = await loadGeometry();
    console.log("Mongo Data:", geometry);
@@ -264,7 +322,6 @@ async function loadSavedGeometry() {
 }
 
 // POINTS
-
 async function addPoint(position) {
    const pointData = {
       type: "point",
@@ -702,13 +759,9 @@ function deleteBuilding(id) {
 // Layers
 function updateLayerVisibility() {
    tileGroup.visible = layers.value.tiles;
-
    pointGroup.visible = layers.value.points;
-
    lineGroup.visible = layers.value.lines;
-
    polygonGroup.visible = layers.value.polygons;
-
    buildingGroup.visible = layers.value.buildings;
 }
 
@@ -795,113 +848,13 @@ function onWindowResize() {
    renderer.setSize(window.innerWidth, window.innerHeight);
 }
 
-function convertTileCenter(oldZoom, newZoom, x, y) {
-   const zoomDiff = newZoom - oldZoom;
-
-   if (zoomDiff > 0) {
-      const factor = Math.pow(2, zoomDiff);
-      return {
-         x: Math.floor(x * factor),
-         y: Math.floor(y * factor),
-      };
-   }
-
-   if (zoomDiff < 0) {
-      const factor = Math.pow(2, Math.abs(zoomDiff));
-      return {
-         x: Math.floor(x / factor),
-         y: Math.floor(y / factor),
-      };
-   }
-   return { x, y };
-}
-
-function calculateZoom() {
-   const distance = camera.position.distanceTo(controls.target);
-   if (distance < 300) return 16;
-   if (distance < 600) return 15;
-   if (distance < 1200) return 14;
-   if (distance < 2500) return 13;
-   return 12;
-}
-
-function clearTiles() {
-   tileCache.forEach((tile) => {
-      tileGroup.remove(tile);
-      tile.geometry.dispose();
-      tile.material.map.dispose();
-      tile.material.dispose();
-   });
-
-   tileCache.clear();
-}
-
-async function updateTileStreaming() {
-   const zoom = calculateZoom();
-   // console.log("Zoom Changed:", zoom);
-   if (zoom !== lastZoom) {
-      const newCenter = convertTileCenter(
-         currentZoom,
-         zoom,
-         currentCenterX,
-         currentCenterY,
-      );
-      currentCenterX = newCenter.x;
-      currentCenterY = newCenter.y;
-      currentZoom = zoom;
-      lastZoom = zoom;
-      lastCenterTileX = currentCenterX;
-      lastCenterTileY = currentCenterY;
-      clearTiles();
-      await loadTiles(currentCenterX, currentCenterY);
-      console.log("Zoom:", currentZoom, "Center:", currentCenterX, currentCenterY);
-
-      return;
-   }
-
-   const tileOffsetX = Math.floor(controls.target.x / TILE_SIZE);
-   const tileOffsetY = Math.floor(controls.target.z / TILE_SIZE);
-   const centerTileX = currentCenterX + tileOffsetX;
-   const centerTileY = currentCenterY + tileOffsetY;
-   if (centerTileX === lastCenterTileX && centerTileY === lastCenterTileY) return;
-   lastCenterTileX = centerTileX;
-   lastCenterTileY = centerTileY;
-   console.log("New Tile Center:", centerTileX, centerTileY);
-   await loadTiles(centerTileX, centerTileY);
-   updateTilePositions(centerTileX, centerTileY);
-   unloadFarTiles(centerTileX, centerTileY);
-}
-
-function unloadFarTiles(centerX, centerY) {
-   // const keepRadius = TILE_RADIUS + 1;
-   const keepRadius = TILE_RADIUS;
-   tileCache.forEach((tile, key) => {
-      const dx = Math.abs(tile.userData.x - centerX);
-      const dy = Math.abs(tile.userData.y - centerY);
-
-      if (dx > keepRadius || dy > keepRadius) {
-         tileGroup.remove(tile);
-         tile.geometry.dispose();
-         tile.material.map.dispose();
-         tile.material.dispose();
-         tileCache.delete(key);
-      }
-   });
-}
-
-function updateTilePositions(centerX, centerY) {
-   tileCache.forEach((tile) => {
-      const tileX = tile.userData.x;
-      const tileY = tile.userData.y;
-      tile.position.x = (tileX - centerX) * TILE_SIZE;
-      tile.position.z = (tileY - centerY) * TILE_SIZE;
-   });
-}
-
 function animate() {
    requestAnimationFrame(animate);
    controls.update();
-   updateTileStreaming();
+   // updateTileStreaming();
+
+   updateTileManager();
+
    renderer.render(scene, camera);
 }
 </script>
