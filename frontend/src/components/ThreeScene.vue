@@ -202,7 +202,7 @@ function init() {
    );
 
    // camera.position.set(800, 800, 800);
-   camera.position.set(0, 1200, 0);
+   camera.position.set(0, 1400, 0);
 
    renderer = new THREE.WebGLRenderer({
       antialias: true,
