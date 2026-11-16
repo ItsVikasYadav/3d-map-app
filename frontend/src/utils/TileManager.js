@@ -208,15 +208,4 @@ export class TileManager {
       }
       return null;
    }
-
-   // getParentTile(z, x, y) {
-   //    if (z <= 0) {
-   //       return null;
-   //    }
-
-   //    const parentZ = z - 1;
-   //    const parentX = Math.floor(x / 2);
-   //    const parentY = Math.floor(y / 2);
-   //    return this.tileCache.get(parentZ, parentX, parentY);
-   // }
 }

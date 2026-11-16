@@ -21,27 +21,7 @@ export class CameraController {
       return 10;
    }
 
-   // getZoomLevel() {
-   //    const distance = this.getDistance();
-
-   //    if (distance < 100) return 14;
-   //    if (distance < 200) return 13;
-   //    if (distance < 400) return 12;
-   //    if (distance < 800) return 11;
-   //    if (distance < 1600) return 10;
-
-   //    return 10;
-   // }
-
-   // getZoomLevel() {
-   //    const distance = this.getDistance();
-   //    if (distance > 2500) return 10;
-   //    if (distance > 1500) return 11;
-   //    if (distance > 900) return 12;
-   //    if (distance > 500) return 13;
-
-   //    return 14;
-   // }
+  
    getCenterWorldPosition() {
       return {
          x: this.controls.target.x,

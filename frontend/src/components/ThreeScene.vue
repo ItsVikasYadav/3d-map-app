@@ -255,9 +255,6 @@ function updateTileManager() {
    const centerChanged =
       Math.abs(currentCenterX - lastCenterTileX) > 0.25 ||
       Math.abs(currentCenterY - lastCenterTileY) > 0.25;
-   // const centerChanged =
-   //    Math.abs(currentCenterX - lastCenterTileX) > 0.5 ||
-   //    Math.abs(currentCenterY - lastCenterTileY) > 0.5;
 
    if (!centerChanged) {
       return;
